@@ -1,56 +1,39 @@
 # 秋の小说 (book-read)
 
-纯本地 TXT 小说阅读器，Android 4.0+。**零网络权限**——不上传任何数据，不联网，不内嵌广告。
+**纯本地 TXT 小说阅读器 · Android 4.0+ · 零网络权限**
 
-> 读什么、存哪里，全部由你掌控。把 txt 文件放进手机，打开 app 就能看。
+不上传任何数据，不联网，不内嵌广告。读什么、存哪里，全部由你掌控——把 txt 文件放进手机，打开就能看。
 
-<p align="center">
-  <img src="screenshots/bookshelf.jpg" width="220" />
-  <img src="screenshots/reader.jpg" width="220" />
-  <img src="screenshots/book-detail.jpg" width="220" />
-</p>
+## 为什么是它
 
-<details>
-<summary>更多截图（分组列表 / 阅读菜单 / 设置）</summary>
-
-<p align="center">
-  <img src="screenshots/group-list.jpg" width="220" />
-  <img src="screenshots/reader-settings.jpg" width="220" />
-  <img src="screenshots/settings.jpg" width="220" />
-</p>
-
-</details>
-
-## 特性
-
-- **纯离线**：manifest 里没有 `INTERNET` 权限，物理上不可能联网，不内嵌广告
-- **老设备 / 低配硬件友好**：最低支持 Android 4.0（minSdk 14），点读笔、儿童手表这类低配置设备也能安装运行；适配小屏 / 瘦长屏
-- **大书库不卡**：实测 10000+ 本 / 20GB 书库，流式扫描 + 分行容错缓存，1GB 内存的老机型也能跑
-- **操作逻辑与番茄小说 App 一致**：用惯番茄的用户零学习成本上手
-- **秒开秒续读**：章节索引缓存 + 阅读进度持久化，替换 txt 文件后进度也不丢
-- **文件夹即分组**：小说目录里怎么建文件夹，书架里就是怎么分组——支持任意多级子文件夹分组浏览，按作者、系列归档一目了然
-- **封面支持**：把与小说 `book_id` **同名的 png 图片放在小说旁边**（如 `999001.png`），自动显示为封面（3:4 比例）；没有图片则按书名自动生成配色封面
-- **翻页引擎**：拖拽/点击翻页、动画中再次操作即时结算不吞页
-- **音量键翻页**、电量显示、锁定竖屏
+| | |
+|---|---|
+| **纯离线** | manifest 里没有 `INTERNET` 权限，物理上不可能联网，隐私零风险 |
+| **老设备也能装** | 最低支持 Android 4.0（minSdk 14），点读笔、儿童手表这类低配置设备照样流畅运行，小屏 / 瘦长屏已适配 |
+| **万本大书库不卡** | 实测 10000+ 本 / 20GB 书库，流式扫描 + 分行容错缓存，1GB 内存的老机器也扛得住 |
+| **零学习成本** | 操作逻辑与番茄小说 App 一致，用过番茄的直接上手 |
+| **文件夹即分组** | 小说目录里怎么建文件夹，书架里就是什么分组，支持任意多级子目录，按作者、系列归档一目了然 |
+| **秒开秒续读** | 章节索引缓存 + 阅读进度持久化，替换 txt 文件后进度也不丢 |
+| **封面自动识别** | 小说旁边放一张与 `book_id` 同名的 png 图片（如 `999001.png`）即自动成为封面（3:4 比例）；没有图片则按书名生成配色封面 |
+| **翻页体验** | 拖拽 / 点击翻页、动画中再次操作即时结算不吞页；支持音量键翻页、阅读进度条、电量显示 |
+| **轻量** | Java 8 + 原生 XML，无 Kotlin、无跨端框架，release 安装包仅 1.2MB |
 
 ## 下载安装
 
 **当前最新版本：v1.0.29（versionCode 30，2026-10）**，更新历史见 [Releases](../../releases)。
 
-**快速下载**：[https://qwdf.lanzouw.com/ihAnA4aqg9gh](https://qwdf.lanzouw.com/ihAnA4aqg9gh)（网盘密码：`cq6x`）
+- **快速下载（蓝奏云）**：[https://qwdf.lanzouw.com/ihAnA4aqg9gh](https://qwdf.lanzouw.com/ihAnA4aqg9gh)　密码：`cq6x`
+- **GitHub 下载**：[Releases 页面](../../releases) → 最新的 `readbook-v*.apk`
 
-也可以到 [Releases 页面](../../releases) 下载最新的 `readbook-v*.apk`。
-
-- 安装后首次使用：给「所有文件访问」权限（按路径扫描本地目录需要）
-- 小说 txt 自行准备，本仓库**不分发任何小说内容**
+安装后首次使用请授予「所有文件访问」权限（按路径扫描本地目录需要）。小说 txt 请自行准备，本仓库**不分发任何小说内容**。
 
 ## 小说文件格式
 
-应用按约定解析 txt，示例如下：
+应用按下面的约定解析 txt，元数据缺省也能正常阅读：
 
 ```
-书名：冒烟测试书
-作者：秋晚的枫
+书名：示例书名
+作者：某作者
 book_id=999001
 状态：完结
 评分：4.5
@@ -69,19 +52,35 @@ book_id=999001
 　　……
 ```
 
-- 头部元数据（`书名/作者/book_id/简介` 等，可选）与正文用 `====` 分隔线隔开
+- 头部元数据（`书名`、`作者`、`book_id`、`简介` 等，均可选）与正文用 `====` 分隔线隔开
 - 章节行：`第X章 标题`；卷标题：`【第X卷：卷名】`
-- **封面**：与 txt 同目录放 `book_id.png`（book_id 即头部 `book_id=` 的值），如 `999001.png`
-- 编码支持 UTF-8 / GBK 等（自动探测，只读文件头 32KB，万册书库扫描不读全文）
+- **封面**：与本文件同目录放 `book_id.png`（文件名即头部 `book_id=` 的值），例如 `999001.png`
+- 编码自动探测，支持 UTF-8 / GBK 等；只读文件头 32KB，因此万册书库扫描不会读全文
 
 ### 兼容番茄小说下载器
 
-本应用兼容 [Tomato-Novel-Downloader](https://github.com/zhongbai2333/Tomato-Novel-Downloader) 下载导出的小说 txt，
-无需任何转换，导出后放进存储目录即可直接阅读——书名、作者、简介、章节、卷、封面（`book_id.png`）全部自动识别。
+本应用直接兼容 [Tomato-Novel-Downloader](https://github.com/zhongbai2333/Tomato-Novel-Downloader) 导出的小说 txt，**无需任何转换**——书名、作者、简介、章节、卷、封面（`book_id.png`）全部自动识别，导出后放进存储目录即可阅读。
 
-```text
-番茄小说 --下载--> Tomato-Novel-Downloader --导出 txt--> 手机存储目录 --扫描--> 秋の小说
 ```
+番茄小说 → Tomato-Novel-Downloader（下载 / 导出 txt）→ 手机存储目录 → 秋の小说（扫描 → 阅读）
+```
+
+## 常见问题
+
+**Q：加进去的小说没出现在书架里？**
+新增或删除文件后，在书架页点「⋮ → 重新扫描目录」手动刷新一次（应用平时启动只读缓存、不自动扫描，所以开得飞快）。
+
+**Q：换了一本同名的小说，阅读进度会不会丢？**
+不会。替换 txt 后打开阅读会自动重新探测编码并重建索引，阅读进度保留；但新文件要与旧文件放在同一路径。
+
+**Q：怎么给小说配封面？**
+在 txt 同目录放一张 `book_id.png`，文件名与小说头部 `book_id=` 的值一致即可（如 `999001.png`）。
+
+**Q：怎么给书架分组？**
+直接在小说的存储目录里建文件夹——单层或多层都行，书架里会自动出现同样的分组结构。
+
+**Q：闪退了怎么办？**
+应用会把崩溃日志写到你的小说存储目录下，名为 `crash.log`，把它反馈到 Issues 即可帮你定位。
 
 ## 从源码构建
 
@@ -90,31 +89,29 @@ JDK 21 + Android Gradle Plugin 8.4.0 + Gradle 8.7 + compileSdk 34 + minSdk 14
 ```
 
 ```bash
-# local.properties 里配好 sdk.dir 后：
-./gradlew clean assembleDebug          # 调试包
-./gradlew clean assembleRelease        # 发布包（需要 keystore.properties 配签名，
-                                       #  没有则自动回落 debug 签名）
-./gradlew testDebugUnitTest            # 47 条单元测试（Robolectric）
+# 先在 local.properties 里配好 sdk.dir
+./gradlew clean assembleDebug       # 构建调试包
+./gradlew clean assembleRelease     # 构建发布包（需 keystore.properties 配签名，缺失时自动回落 debug 签名）
+./gradlew testDebugUnitTest         # 运行 47 条单元测试（Robolectric）
 ```
 
-签名配置：工程根目录放 `keystore.properties`（`storeFile=` / `storePassword=` / `keyAlias=` / `keyPassword=`），
-密钥文件放 `keystore/` 下。**这两个路径不入库**，用你自己的密钥即可。
+**签名配置**：工程根目录放 `keystore.properties`（`storeFile=` / `storePassword=` / `keyAlias=` / `keyPassword=`），密钥文件放 `keystore/` 目录下。这两个路径不入库，请使用你自己的密钥。
 
 ## 工程结构
 
 ```
 app/src/main/java/com/qiuwdf/readbook/
 ├── core/       # 书架扫描、缓存（流式 JSON Lines）、设置
-├── parser/     # 编码探测 + txt 元数据/章节解析
-├── reader/     # 阅读页 + 翻页引擎（ReaderView）
-├── ui/         # 书架 / 详情 / 阅读Activity
+├── parser/     # 编码探测 + txt 元数据 / 章节解析
+├── reader/     # 阅读页与翻页引擎（ReaderView）
+├── ui/         # 书架 / 详情 / 阅读 Activity
 ├── util/       # 封面加载（LRU）、目录选择、格式化
 └── widget/     # 封面控件（3:4 比例，进度条叠加）
 ```
 
 ## 开发说明
 
-- **技术栈**：Java 8 + 原生 XML 布局，无 Kotlin、无跨端框架、依赖极轻（release APK 约 1.2MB）
+- **技术栈**：Java 8 + 原生 XML 布局，无 Kotlin、无跨端框架，依赖极轻
 - **开发方式**：本项目全程 AI 辅助开发，由 AI 与作者协作完成
 - **质量保障**：47 条 Robolectric 单元测试 + R8 混淆发布，真机覆盖 Android 5.1 老机型
 
