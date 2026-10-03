@@ -8,11 +8,11 @@ import java.io.File;
 
 /**
  * 存储目录管理：
- * 默认目录为 /sdcard/MoRead（需要存储权限），无权限时回落到应用私有目录。
+ * 默认目录为 /sdcard/QiuReader（需要存储权限），无权限时回落到应用私有目录。
  */
 public final class Storage {
 
-    public static final String PUBLIC_DIR_NAME = "MoRead";
+    public static final String PUBLIC_DIR_NAME = "QiuReader";
 
     private Storage() {
     }
@@ -26,7 +26,7 @@ public final class Storage {
         return new File(base, "Books");
     }
 
-    /** 公共存储目录（/sdcard/MoRead） */
+    /** 公共存储目录（/sdcard/QiuReader） */
     public static File publicDir() {
         return new File(Environment.getExternalStorageDirectory(), PUBLIC_DIR_NAME);
     }
