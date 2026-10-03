@@ -4,12 +4,22 @@
 
 > 读什么、存哪里，全部由你掌控。把 txt 文件放进手机，打开 app 就能看。
 
-<!-- TODO: 建议在这里放两张截图（书架 + 阅读页），例如：
 <p align="center">
-  <img src="screenshots/bookshelf.png" width="270" />
-  <img src="screenshots/reader.png" width="270" />
+  <img src="screenshots/bookshelf.jpg" width="220" />
+  <img src="screenshots/reader.jpg" width="220" />
+  <img src="screenshots/book-detail.jpg" width="220" />
 </p>
--->
+
+<details>
+<summary>更多截图（分组列表 / 阅读菜单 / 设置）</summary>
+
+<p align="center">
+  <img src="screenshots/group-list.jpg" width="220" />
+  <img src="screenshots/reader-settings.jpg" width="220" />
+  <img src="screenshots/settings.jpg" width="220" />
+</p>
+
+</details>
 
 ## 特性
 
