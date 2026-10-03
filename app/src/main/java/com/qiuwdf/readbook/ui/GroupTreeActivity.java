@@ -13,6 +13,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AppCompatActivity;
+
 import com.qiuwdf.readbook.R;
 import com.qiuwdf.readbook.core.Book;
 import com.qiuwdf.readbook.core.Bookshelf;
@@ -26,8 +28,13 @@ import java.util.List;
  * 全屏的树状分组选择页：最上面是「全部」，下面按存储目录的文件夹层级展示，
  * 仿资源管理器的 ＋/－ 展开收起；点某一层即选中该列表并返回书架。
  * 内容超出一屏可上下滚动，文件夹名过长可左右滚动；右上角 X 关闭（不改变选择）。
+ *
+ * <p>必须继承 {@code AppCompatActivity}：AppCompat 的夜间模式（{@code MODE_NIGHT_*}）
+ * 是靠 AppCompatDelegate 逐个 Activity 套用的，普通 {@code android.app.Activity}
+ * 拿不到代理，本页的 {@code @color/bar_bg}、{@code @color/page_bg} 会按**系统**的
+ * 白天/黑夜取值 —— 系统白天 + App 设夜间时整页仍是白的。
  */
-public class GroupTreeActivity extends android.app.Activity {
+public class GroupTreeActivity extends AppCompatActivity {
 
     /** 结果 extra：选中的分组路径（"" = 全部） */
     public static final String RESULT_EXTRA_GROUP = "group";

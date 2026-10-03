@@ -16,8 +16,11 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Environment;
 import android.os.Looper;
@@ -119,6 +122,14 @@ public class SmokeTest {
         }
         // 扫描并行度也是静态开关：每个用例回到「自动」
         Bookshelf.setScanThreadsOverrideForTest(0);
+        // 夜间模式是 AppCompat 的静态默认值 + Prefs 里的持久化值：上个用例设成夜间后，
+        // 本用例里再切主题就会触发 Activity 重建、界面引用失效（用例间串扰）—— 统一回到「跟随系统」
+        try {
+            Prefs.get().setNightMode(Prefs.NIGHT_FOLLOW);
+            App.applyNightMode();
+        } catch (Throwable ignore) {
+            // Prefs 尚未初始化时不影响用例
+        }
     }
 
     /** 1) 所有布局文件逐个 inflate：能抓出缺 XML 构造函数、非法主题属性等问题 */
@@ -3335,6 +3346,65 @@ public class SmokeTest {
         assertGuides(container, "硬科幻", GuideLineView.LINE, GuideLineView.CORNER);
 
         c.pause().stop().destroy();
+    }
+
+    /**
+     * 58) 分组选择页必须跟随 App 的夜间模式（回归用例）。
+     *
+     * <p>GroupTreeActivity 曾是全应用唯一继承 {@code android.app.Activity} 的页面：
+     * 没有 AppCompatDelegate，AppCompat 的 MODE_NIGHT_* 对它无效，
+     * 页面里 {@code @color/bar_bg}、{@code @color/page_bg} 取的是**系统**的 uiMode ——
+     * 系统白天 + App 设成夜间时，这一页仍是白的（用户报的「分组选择列表没深色模式」）。
+     *
+     * <p>这里同时断言对照组（MainActivity，AppCompatActivity）确实变深，
+     * 这样万一将来夜间模式机制在测试环境失效，失败信息能直接指向原因。
+     */
+    @Test
+    @Config(sdk = 22, qualifiers = "notnight")
+    public void groupTreeFollowsAppNightMode() {
+        Context app = RuntimeEnvironment.getApplication();
+        int dayBar = barColorForUiMode(app, Configuration.UI_MODE_NIGHT_NO);
+        int nightBar = barColorForUiMode(app, Configuration.UI_MODE_NIGHT_YES);
+        assertTrue("白天与夜间的 bar_bg 应当不同（day=" + Integer.toHexString(dayBar)
+                + " night=" + Integer.toHexString(nightBar) + "）", dayBar != nightBar);
+
+        Prefs.get().setNightMode(Prefs.NIGHT_NIGHT);
+        App.applyNightMode();
+
+        // 被测页面必须最先创建：AppCompatActivity 的夜间模式是「逐个 Activity 套用」的，
+        // 若先开了别的页面，配置可能已经被改到进程级，掩盖掉本用例要抓的问题
+        ActivityController<GroupTreeActivity> gc = Robolectric.buildActivity(
+                GroupTreeActivity.class, GroupTreeActivity.createIntent(app, "")).setup();
+        View treeBar = gc.get().findViewById(R.id.tree_top_bar);
+        assertNotNull("activity_group_tree.xml 未找到顶栏", treeBar);
+        assertEquals("分组选择页没跟随 App 的夜间模式（仍按系统白天配置取色）",
+                nightBar, backgroundColorOf(treeBar));
+
+        // 对照组：AppCompatActivity 的页面（MainActivity 底部导航栏）必须跟随夜间模式
+        ActivityController<MainActivity> mc = Robolectric.buildActivity(MainActivity.class).setup();
+        View navBar = mc.get().findViewById(R.id.nav_bar);
+        assertNotNull("activity_main.xml 未找到底部导航栏", navBar);
+        assertEquals("对照失败：AppCompatActivity 页面没跟随 App 的夜间模式",
+                nightBar, backgroundColorOf(navBar));
+
+        mc.pause().stop().destroy();
+        gc.pause().stop().destroy();
+    }
+
+    /** 某个 uiMode（白天 / 夜间）下 bar_bg 的真实颜色值 */
+    private static int barColorForUiMode(Context app, int nightMode) {
+        Configuration c = new Configuration(app.getResources().getConfiguration());
+        c.uiMode = (c.uiMode & ~Configuration.UI_MODE_NIGHT_MASK) | nightMode;
+        return app.createConfigurationContext(c).getResources().getColor(R.color.bar_bg);
+    }
+
+    /** 视图背景的实际颜色（背景必须是纯色，取不到就是测试写错了，直接失败） */
+    private static int backgroundColorOf(View v) {
+        Drawable d = v.getBackground();
+        assertNotNull("视图没有背景：" + v, d);
+        assertTrue("视图背景不是纯色而是 " + d.getClass().getSimpleName(),
+                d instanceof ColorDrawable);
+        return ((ColorDrawable) d).getColor();
     }
 
     /** 找到名字为 name 的行，断言其引导格的线型序列 */
