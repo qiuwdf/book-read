@@ -20,7 +20,7 @@
 
 ## 下载安装
 
-**当前最新版本：v1.0.29（versionCode 30，2026-10）**，更新历史见 [Releases](../../releases)。
+**当前最新版本：v1.0.31（versionCode 32，2026-10）**，更新历史见 [Releases](../../releases)。
 
 - **快速下载（蓝奏云）**：[https://qwdf.lanzouw.com/ihAnA4aqg9gh](https://qwdf.lanzouw.com/ihAnA4aqg9gh)　密码：`cq6x`
 - **GitHub 下载**：[Releases 页面](../../releases) → 最新的 `readbook-v*.apk`
