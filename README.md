@@ -22,7 +22,7 @@
 
 **当前最新版本：v1.0.32（versionCode 33，2026-10）**，更新历史见 [Releases](../../releases)。
 
-- **快速下载（蓝奏云）**：[https://qwdf.lanzouw.com/ihAnA4aqg9gh](https://qwdf.lanzouw.com/ihAnA4aqg9gh)　密码：`cq6x`
+- **快速下载（蓝奏云）**：[https://qwdf.lanzouw.com/b0188o0kkd](https://qwdf.lanzouw.com/b0188o0kkd)　密码：`hnaf`
 - **GitHub 下载**：[Releases 页面](../../releases) → 最新的 `readbook-v*.apk`
 
 安装后首次使用请授予「所有文件访问」权限（按路径扫描本地目录需要）。小说 txt 请自行准备，本仓库**不分发任何小说内容**。
