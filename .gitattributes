@@ -1,0 +1,3 @@
+# 语言统计：图标生成脚本是本地离线工具（只在开发时跑一次生成 PNG），
+# 不属于项目源码语言，标记后 GitHub 语言栏只会显示 Java
+tools/gen_icons.py linguist-detectable=false
