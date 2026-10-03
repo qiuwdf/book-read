@@ -24,7 +24,9 @@
 
 ## 下载安装
 
-**快速下载**：[Releases 页面](../../releases) → 下载最新的 `readbook-v*.apk` 安装即可。
+**快速下载**：[https://qwdf.lanzouw.com/ihAnA4aqg9gh](https://qwdf.lanzouw.com/ihAnA4aqg9gh)（网盘密码：`cq6x`）
+
+也可以到 [Releases 页面](../../releases) 下载最新的 `readbook-v*.apk`。
 
 - 安装后首次使用：给「所有文件访问」权限（按路径扫描本地目录需要）
 - 小说 txt 自行准备，本仓库**不分发任何小说内容**
