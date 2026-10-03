@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 黑夜模式 -->
+    <color name="brand">#F4552F</color>
+    <color name="brand_dark">#C33C18</color>
+    <color name="brand_light">#3A2118</color>
+
+    <color name="page_bg">#121316</color>
+    <color name="card_bg">#1C1E22</color>
+    <color name="card_bg_pressed">#26292E</color>
+    <color name="divider">#2A2D33</color>
+    <color name="tree_guide">#3C4048</color>
+    <color name="bar_bg">#1A1C20</color>
+    <color name="mask">#B3000000</color>
+
+    <color name="text_primary">#D8D9DC</color>
+    <color name="text_secondary">#7D8188</color>
+    <color name="text_tertiary">#5A5E65</color>
+    <color name="text_on_brand">#FFFFFF</color>
+
+    <color name="rating">#FFB13D</color>
+    <color name="tag_bg">#26292E</color>
+
+    <color name="reader_bg">#1A1A1A</color>
+    <color name="reader_bar_bg">#1F2126</color>
+</resources>

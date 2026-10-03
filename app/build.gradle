@@ -1,0 +1,94 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 正式签名：路径与口令放在不进版本库的 keystore.properties（工程根目录）
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+def hasReleaseKeystore = keystorePropsFile.exists()
+if (hasReleaseKeystore) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+android {
+    namespace 'com.qiuwdf.readbook'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.qiuwdf.readbook"
+        // 最低支持 Android 4.0 (API 14)
+        minSdk 14
+        targetSdk 34
+        versionCode 30
+        versionName "1.0.29"
+        vectorDrawables.useSupportLibrary = true
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseKeystore) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // R8 代码裁剪 + 混淆 + 资源裁剪：只作用于 release 包，源码与 debug 包不受影响
+            // 类名会被打乱，反解崩溃堆栈要用 mapping/release/mapping.txt
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 没有 keystore.properties 时回落 debug 签名，保证别的机器上照样能出包
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
+    // 无设备冒烟测试：在 API 22（Android 5.1，与目标真机一致）上真实 inflate 每个界面
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            returnDefaultValues = true
+        }
+        unitTests.all {
+            // Robolectric 从国内镜像拉取 android-all jar
+            systemProperty 'robolectric.dependency.repo.url', 'https://maven.aliyun.com/repository/public'
+            systemProperty 'robolectric.dependency.repo.id', 'aliyun'
+            // JDK 17+ 需要开放模块，否则 Robolectric 无法反射访问 JDK 内部类
+            jvmArgs += ['--add-opens=java.base/java.lang=ALL-UNNAMED',
+                        '--add-opens=java.base/java.util=ALL-UNNAMED',
+                        '--add-opens=java.base/java.io=ALL-UNNAMED',
+                        '--add-opens=java.base/java.nio=ALL-UNNAMED',
+                        '--add-opens=java.base/java.text=ALL-UNNAMED',
+                        '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+                        '--add-opens=java.base/java.net=ALL-UNNAMED']
+        }
+    }
+
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*']
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.13'
+}

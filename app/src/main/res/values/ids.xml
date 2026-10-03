@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      主题模式三个单选项的 id。
+      它们是同一个布局重复 inflate 出来的，必须各自有独立 id ——
+      RadioGroup 靠 id 记录「当前选中项」，共用同一个 id 会让互斥失效。
+    -->
+    <item name="theme_option_follow" type="id" />
+    <item name="theme_option_day" type="id" />
+    <item name="theme_option_night" type="id" />
+    <!-- 详情页全屏封面查看里的 ImageView（Dialog 内容，需可被 findViewById） -->
+    <item name="cover_viewer" type="id" />
+</resources>

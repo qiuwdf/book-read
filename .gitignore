@@ -1,0 +1,30 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+
+# 签名密钥与口令：绝不进版本库
+/keystore
+/keystore.properties
+
+# R8 混淆映射（发布时备份在本地，不公开）
+/readbook-*-mapping.txt
+
+# 构建产物 APK：发布走仓库的 Release 功能，不进 git
+/readbook-*.apk
+*.class
+
+# 小说样例/测试数据：网文有版权，绝不进公开仓库
+/崩溃小说文件/
+/示例多级小说文件夹/
+/示例小说文件/
+
+# 运行期数据与崩溃日志
+crash.log
+/.workbuddy

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 单选项圆圈：选中 = 圆环 + 实心点，未选中 = 空心圆 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:drawable="@drawable/ic_radio_on" />
+    <item android:drawable="@drawable/ic_radio_off" />
+</selector>

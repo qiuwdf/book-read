@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 注意：应用名在 app_name 与 settings_about_desc 里各出现一次，改一处必须改两处 -->
+    <string name="app_name">秋の小说</string>
+
+    <!-- 底部导航 -->
+    <string name="tab_bookshelf">书架</string>
+    <string name="tab_mine">设置</string>
+
+    <!-- 书架 -->
+    <string name="bookshelf">书架</string>
+    <string name="group_all">全部</string>
+    <string name="group_pick_title">选择列表</string>
+    <string name="empty_bookshelf">书架还是空的\n把 TXT 小说放进存储目录后，\n点右上角「⋮」→「重新扫描目录」</string>
+    <string name="search_hint">搜索书名、作者或分组</string>
+    <string name="scanning">正在扫描小说目录…</string>
+    <string name="scanning_progress">正在扫描 %1$d/%2$d</string>
+    <string name="book_count">共 %1$d 本</string>
+    <string name="sort_recent">最近阅读</string>
+    <string name="sort_name">书名</string>
+    <string name="sort_added">添加时间</string>
+    <string name="menu_sort">排序方式</string>
+    <string name="menu_refresh">重新扫描目录</string>
+    <string name="menu_storage">存储目录</string>
+
+    <!-- 详情 -->
+    <string name="book_detail">书籍详情</string>
+    <string name="start_read">开始阅读</string>
+    <string name="delete_book">删除本书</string>
+    <string name="label_author">作者：%1$s</string>
+    <string name="label_group">分组：%1$s</string>
+    <string name="label_intro">简介</string>
+
+    <!-- 阅读器 -->
+    <string name="reader_chapters">目录</string>
+    <string name="reader_settings">设置</string>
+    <string name="reader_brightness">亮度</string>
+    <string name="reader_font_size">字号</string>
+    <string name="reader_line_space">行距</string>
+    <string name="reader_page_anim">翻页动画</string>
+    <string name="reader_volume_key">音量键翻页</string>
+    <string name="reader_font_system">系统</string>
+    <string name="reader_indent">首行缩进</string>
+    <string name="reader_theme">背景</string>
+    <string name="night_on">黑夜</string>
+
+    <!-- 设置 -->
+    <string name="settings_storage">小说存储目录</string>
+    <string name="settings_storage_desc">目录下的子文件夹会自动作为分组</string>
+    <string name="settings_theme">主题模式</string>
+    <string name="theme_follow">跟随系统</string>
+    <string name="theme_day">白天模式</string>
+    <string name="theme_night">黑夜模式</string>
+    <string name="settings_reading">阅读设置</string>
+    <string name="settings_about">关于</string>
+    <string name="settings_about_desc">秋の小说 · 本地 TXT 阅读器\n开发者：秋晚的枫\n支持音量键翻页（+ 上一页 / - 下一页）\n支持 Android 4.0 及以上系统</string>
+    <string name="settings_rescan">重新扫描书架</string>
+    <string name="settings_clear_cache">清除解析缓存</string>
+    <string name="cache_cleared">清除成功</string>
+    <string name="cancel">取消</string>
+    <string name="confirm">确定</string>
+    <string name="delete">删除</string>
+
+    <!-- 存储目录选择 -->
+    <string name="dir_picker_local_only">该位置不是手机本地存储，请选择手机存储或存储卡中的文件夹</string>
+    <string name="dir_picker_volume_unresolved">未能识别该存储位置，请改选存储卡的根目录或其下的文件夹</string>
+    <string name="storage_pick_title">选择存储目录</string>
+    <string name="storage_pick_system">系统文件夹选择器</string>
+    <string name="storage_pick_default">恢复默认目录</string>
+    <string name="storage_pick_failed">未能识别该存储位置</string>
+    <string name="storage_pick_unsupported">当前系统没有文件夹选择器，无法更改存储目录</string>
+
+    <!-- 提示 -->
+    <string name="toast_dir_unavailable">目录不可读，请重新选择</string>
+    <string name="toast_book_missing">小说文件已不存在</string>
+    <string name="toast_parse_failed">解析失败：%1$s</string>
+    <string name="toast_deleted">已删除</string>
+    <string name="toast_last_chapter">已经是最后一章了</string>
+    <string name="toast_first_chapter">已经是第一章了</string>
+    <string name="toast_no_chapter">没有找到任何章节，请确认文件为 TXT 小说</string>
+</resources>

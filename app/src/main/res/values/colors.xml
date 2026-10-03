@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 品牌色 -->
+    <color name="brand">#F4552F</color>
+    <color name="brand_dark">#D8401B</color>
+    <color name="brand_light">#FFEDE6</color>
+
+    <!-- 页面 / 卡片 -->
+    <color name="page_bg">#F2F3F5</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="card_bg_pressed">#F0F0F0</color>
+    <color name="divider">#EBEBEB</color>
+    <color name="tree_guide">#C8C8C8</color>
+    <color name="bar_bg">#FFFFFF</color>
+    <color name="mask">#99000000</color>
+
+    <!-- 文字 -->
+    <color name="text_primary">#1F1F1F</color>
+    <color name="text_secondary">#8C8C8C</color>
+    <color name="text_tertiary">#B4B4B4</color>
+    <color name="text_on_brand">#FFFFFF</color>
+
+    <!-- 状态 -->
+    <color name="rating">#FF9500</color>
+    <color name="tag_bg">#F5F5F5</color>
+
+    <!-- 阅读器默认背景（白） -->
+    <color name="reader_bg">#FFFFFF</color>
+    <color name="reader_bar_bg">#FFFFFF</color>
+</resources>

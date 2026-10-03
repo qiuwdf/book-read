@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  设置页单选项：一行 = 圆圈 + 文字。
+  用框架的 android.widget.RadioButton 直连（而不是 <RadioButton> 标签），
+  避免 AppCompat 用 buttonCompat 覆盖我们指定的圆圈样式；
+  RadioButton 整行都是点击区，因此「点文字」和「点圆圈」效果一致。
+-->
+<view xmlns:android="http://schemas.android.com/apk/res/android"
+    class="android.widget.RadioButton"
+    style="@style/Widget.MoRead.RadioOption"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content" />

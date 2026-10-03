@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主题单选项之间的分隔线，左侧留白与文字对齐 -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="32dp">
+    <shape android:shape="rectangle">
+        <size android:height="1px" />
+        <solid android:color="@color/divider" />
+    </shape>
+</inset>
