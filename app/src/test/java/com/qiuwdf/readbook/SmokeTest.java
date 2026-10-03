@@ -136,7 +136,7 @@ public class SmokeTest {
     @Test
     public void allLayoutsInflate() throws Exception {
         Context themed = new ContextThemeWrapper(
-                RuntimeEnvironment.getApplication(), R.style.Theme_MoRead);
+                RuntimeEnvironment.getApplication(), R.style.Theme_QiuReader);
         LayoutInflater inflater = LayoutInflater.from(themed);
 
         List<String> names = new ArrayList<String>();

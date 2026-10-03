@@ -7,6 +7,6 @@
 -->
 <view xmlns:android="http://schemas.android.com/apk/res/android"
     class="android.widget.RadioButton"
-    style="@style/Widget.MoRead.RadioOption"
+    style="@style/Widget.QiuReader.RadioOption"
     android:layout_width="match_parent"
     android:layout_height="wrap_content" />

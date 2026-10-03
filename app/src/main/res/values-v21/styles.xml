@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Android 5.0+ 的系统栏配色 -->
-    <style name="Theme.MoRead" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <style name="Theme.QiuReader" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="colorPrimary">@color/brand</item>
         <item name="colorPrimaryDark">@color/brand_dark</item>
         <item name="colorAccent">@color/brand</item>
@@ -19,7 +19,7 @@
         <item name="android:navigationBarColor">@color/bar_bg</item>
     </style>
 
-    <style name="Theme.MoRead.Reader" parent="Theme.MoRead">
+    <style name="Theme.QiuReader.Reader" parent="Theme.QiuReader">
         <item name="android:windowBackground">@color/reader_bg</item>
         <item name="android:statusBarColor">@color/reader_bg</item>
     </style>
