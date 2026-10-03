@@ -53,6 +53,12 @@ public final class Bookshelf {
     /** 进度上报的最小间隔（毫秒），避免几千本书把主线程淹没在进度消息里 */
     private static final long PROGRESS_INTERVAL_MS = 200;
 
+    /**
+     * 打印启动/扫描耗时的开关（诊断弱机启动慢时改成 true，配合 logcat 看
+     * 「读书架缓存 N 本，用时 X ms」；平时关掉，别在发布包里刷日志）。
+     */
+    private static final boolean DEBUG_PERF = false;
+
     private static Bookshelf sInstance;
 
     private final Context mApp;
@@ -63,6 +69,8 @@ public final class Bookshelf {
     private volatile boolean mLoaded = false;
     private volatile Progress mProgress;
     private long mLastProgressAt;
+    /** 阅读进度被改写的次数：书架页据此判断「要不要重画封面上的进度条」 */
+    private volatile int mProgressVersion;
 
     private Bookshelf(Context c) {
         mApp = c.getApplicationContext();
@@ -85,6 +93,11 @@ public final class Bookshelf {
         return mLoaded;
     }
 
+    /** 阅读进度版本号：变了就说明有书的进度被改过（书架页用它决定要不要重绘封面） */
+    public int progressVersion() {
+        return mProgressVersion;
+    }
+
     /** 设置扫描进度监听（传 null 取消）。用于「几千本书扫半天」时给用户可见反馈 */
     public void setProgressListener(Progress p) {
         mProgress = p;
@@ -99,35 +112,47 @@ public final class Bookshelf {
     /**
      * 启动加载：读缓存直接展示，<b>不自动扫描目录</b>。
      *
-     * <p>书库几千本时逐个 stat 文件就要好一阵，每次启动都扫太浪费时间；
-     * 新增/删除/替换文件后用「⋮ → 重新扫描目录」手动刷新
-     * （替换文件的正文字段在打开阅读时另有指纹校验兜底，不依赖扫描）。
-     * 只有缓存为空（首次安装、缓存损坏或被清掉）时才扫描，否则书架直接秒开。
+     * <p>全程**只回调一次**，并且这次拿到的就是完整书架。早先做过「读到 200 本先出屏一次」
+     * 的分批回调，用户看到的是标题栏先写「共 200 本」、过一会儿才跳成真实数量 —— 观感很差，
+     * 而且首批出屏后列表还要整体重建一次，反而更容易看到闪烁。紧凑缓存格式下读全量本身就很快，
+     * 宁可多等这一两百毫秒，也要一次给出完整书架。
      *
-     * <p>读缓存也必须放到后台线程 —— 几千本时它是几千行 JSON 的解析，
-     * 在主线程上做会让启动卡住好几秒（低配机直接 ANR）。
+     * <p>缓存为空（首装 / 被清掉）时才扫描；**存储目录不可读**（没插卡、目录被删）
+     * 就不扫，否则白等几十秒还是空的。
+     *
+     * <p>读缓存同样必须在后台线程 —— 几千本在主线程上读会让启动卡住好几秒（低配机直接 ANR）。
      */
     public void loadAsync(final Callback cb) {
         mExecutor.execute(new Runnable() {
             @Override
             public void run() {
+                long t0 = System.currentTimeMillis();
+                ReadProgressStore.get(mApp).loadSync();
                 readCache();
-                boolean empty = false;
+                boolean empty;
                 synchronized (mLock) {
                     empty = mBooks.isEmpty();
                 }
-                if (cb != null) {
-                    notifyLoaded(cb);
-                }
                 if (empty) {
-                    scanSync();
-                    mLoaded = true;
-                    if (cb != null) {
-                        notifyLoaded(cb);
+                    // 没有缓存：首装（或从没配过目录）才扫；配过目录但现在读不到
+                    // （存储卡拔了 / 目录被删）也不扫 —— 否则白等几十秒还是空书架。
+                    // 注意这里**不能**用 Storage.getDir()：它在目录不存在时会直接
+                    // 建默认目录并改写配置，启动时不该有这种副作用。
+                    String configured = Prefs.get().storageDir();
+                    boolean neverConfigured = configured == null || configured.length() == 0;
+                    if (neverConfigured || Storage.isReadable(new File(configured))) {
+                        scanSync();
+                    } else {
+                        Log.w(TAG, "存储目录不可读，跳过启动扫描：" + configured);
                     }
-                } else {
-                    mLoaded = true;
                 }
+                applyProgressStore();
+                mLoaded = true;
+                if (DEBUG_PERF) {
+                    Log.i(TAG, "书架启动加载完成 " + getBooks().size() + " 本，用时 "
+                            + (System.currentTimeMillis() - t0) + "ms");
+                }
+                notifyLoaded(cb);
             }
         });
     }
@@ -151,11 +176,21 @@ public final class Bookshelf {
         });
     }
 
+    /**
+     * 回调书架数据到主线程。
+     *
+     * <p>列表**在投递时就取快照**：回调真正执行时后台线程可能已经改过 mBooks
+     * （例如刚回调完用户就点了「重新扫描目录」），取快照能保证交给界面的就是投递那一刻的数据。
+     */
     private void notifyLoaded(final Callback cb) {
+        if (cb == null) {
+            return;
+        }
+        final List<Book> snapshot = getBooks();
         mMain.post(new Runnable() {
             @Override
             public void run() {
-                cb.onLoaded(getBooks());
+                cb.onLoaded(snapshot);
             }
         });
     }
@@ -186,7 +221,7 @@ public final class Bookshelf {
         return best;
     }
 
-    /** 保存阅读进度 */
+    /** 保存阅读进度（同时写书架缓存与独立的进度账本） */
     public void updateProgress(final String path, final int chapter, final int page) {
         mExecutor.execute(new Runnable() {
             @Override
@@ -196,6 +231,9 @@ public final class Bookshelf {
                     b.lastChapter = chapter;
                     b.lastPage = page;
                     b.lastReadTime = System.currentTimeMillis();
+                    // 进度账本按书号记账：换目录 / 换文件名后仍能认回这本书
+                    ReadProgressStore.get(mApp).save(b, chapter, page);
+                    mProgressVersion++;
                     save();
                 }
             }
@@ -290,7 +328,18 @@ public final class Bookshelf {
             mBooks.clear();
             mBooks.addAll(result);
         }
+        // 扫描出来的书也可能是「换过目录」的老朋友：按书号把进度认回来
+        applyProgressStore();
         save();
+    }
+
+    /** 把阅读进度账本套用到当前书架（换目录 / 删了又下回来的书都能恢复进度） */
+    private void applyProgressStore() {
+        List<Book> snapshot = getBooks();
+        int restored = ReadProgressStore.get(mApp).applyTo(snapshot);
+        if (restored > 0) {
+            Log.i(TAG, "按书号恢复了 " + restored + " 本书的阅读进度");
+        }
     }
 
     /** 上报扫描进度：限流 + post 到主线程 */
@@ -396,7 +445,7 @@ public final class Bookshelf {
     /**
      * 书架索引缓存文件名（由 {@link AppCache} 统一统计与清理，别在别处硬编码）。
      *
-     * <p>内容是**一行一本**的 JSON Lines（首行是格式头），不是整表 JSON ——
+     * <p>内容是**一行一本**的紧凑记录（首行是格式头），不是整表 JSON ——
      * 大书架（几千本）下整表 JSON 会一次性建出几千个对象 + 一份十几 MB 的字符串，
      * 在 64MB 堆的老机型上直接 OutOfMemoryError 崩溃。
      */
@@ -405,8 +454,17 @@ public final class Bookshelf {
     /** 旧版整表 JSON 缓存（1.0.23 及以前）；扫描时顺手删掉，免得白占十几 MB */
     private static final String LEGACY_CACHE_FILE_NAME = "library_cache.json";
 
-    /** 缓存格式头，用于识别缓存版本 / 半截文件 */
-    private static final String CACHE_HEADER = "readbook.library.v2";
+    /**
+     * 缓存格式头。v3 起字段用 0x01 分隔、不再逐行解析 JSON ——
+     * 弱机上让书架秒开的关键：一万本时省掉一万个 JSONObject 的构造与解析。
+     */
+    private static final String CACHE_HEADER = "readbook.library.v3";
+
+    /** v2（含）以前的 JSON Lines 头，仍可读入，下次保存自动升级成 v3 */
+    private static final String CACHE_HEADER_V2 = "readbook.library.v2";
+
+    /** 字段分隔符（0x01，书名/简介里不会出现） */
+    private static final char SEP = '\u0001';
 
     /** 缓存文件（书架索引） */
     public File cacheFile() {
@@ -424,7 +482,7 @@ public final class Bookshelf {
 
     /**
      * 保存书架索引：**逐本**序列化后直接写盘。
-     * 全程只持有一本书的 JSON，堆占用与书架本数无关（写失败也不影响使用，下次扫描重建）。
+     * 全程只持有一本书的记录字符串，堆占用与书架本数无关（写失败也不影响使用，下次扫描重建）。
      */
     private void save() {
         final List<Book> snapshot = getBooks();
@@ -434,13 +492,14 @@ public final class Bookshelf {
                 File tmp = new File(mApp.getFilesDir(), CACHE_FILE_NAME + ".tmp");
                 BufferedWriter w = null;
                 boolean ok = false;
+                long t0 = System.currentTimeMillis();
                 try {
                     w = new BufferedWriter(new OutputStreamWriter(
                             new FileOutputStream(tmp), Charset.forName("UTF-8")), 1 << 16);
                     w.write(CACHE_HEADER);
                     w.write('\n');
                     for (Book b : snapshot) {
-                        w.write(b.toJson().toString());
+                        w.write(toLine(b));
                         w.write('\n');
                     }
                     w.flush();
@@ -465,6 +524,10 @@ public final class Bookshelf {
                         //noinspection ResultOfMethodCallIgnored
                         tmp.renameTo(dst);
                     }
+                    if (DEBUG_PERF) {
+                        Log.i(TAG, "写书架缓存 " + snapshot.size() + " 本，用时 "
+                                + (System.currentTimeMillis() - t0) + "ms");
+                    }
                 } else {
                     //noinspection ResultOfMethodCallIgnored
                     tmp.delete();
@@ -473,18 +536,27 @@ public final class Bookshelf {
         });
     }
 
-    /** 读取书架索引缓存：逐行读，单行损坏只丢那一本 */
+    /**
+     * 读取书架索引缓存：逐行读，单行损坏只丢那一本。
+     *
+     * <p>读完才交给界面（不做分批出屏，见 {@link #loadAsync}）。
+     */
     private void readCache() {
         File f = cacheFile();
         if (!f.isFile()) {
             return;
         }
+        long t0 = System.currentTimeMillis();
         List<Book> list = new ArrayList<Book>();
+        boolean compact = false;
         BufferedReader r = null;
         try {
             r = new BufferedReader(
                     new InputStreamReader(new FileInputStream(f), Charset.forName("UTF-8")), 1 << 16);
-            if (!CACHE_HEADER.equals(r.readLine())) {
+            String header = r.readLine();
+            if (CACHE_HEADER.equals(header)) {
+                compact = true;
+            } else if (!CACHE_HEADER_V2.equals(header)) {
                 return;     // 不是本版本的缓存（或已损坏），交给扫描重建
             }
             String line;
@@ -493,7 +565,7 @@ public final class Bookshelf {
                     continue;
                 }
                 try {
-                    Book b = Book.fromJson(new JSONObject(line));
+                    Book b = compact ? fromLine(line) : Book.fromJson(new JSONObject(line));
                     if (b.path.length() > 0) {
                         list.add(b);
                     }
@@ -513,6 +585,200 @@ public final class Bookshelf {
         synchronized (mLock) {
             mBooks.clear();
             mBooks.addAll(list);
+        }
+        if (DEBUG_PERF) {
+            Log.i(TAG, "读书架缓存 " + list.size() + " 本，用时 "
+                    + (System.currentTimeMillis() - t0) + "ms");
+        }
+    }
+
+    // ------------------------------------------------------------------ 缓存行编解码（v3 紧凑格式）
+
+    /**
+     * 一行 = 一本书，字段用 0x01 分隔：
+     * path,title,author,status,rating,category,tags,readers,intro,group,charset,bid,
+     * words,chapters,size,mtime,added,lc,lp,lrt
+     */
+    private static String toLine(Book b) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append(esc(b.path)).append(SEP);
+        sb.append(esc(b.title)).append(SEP);
+        sb.append(esc(b.author)).append(SEP);
+        sb.append(esc(b.status)).append(SEP);
+        sb.append(esc(b.rating)).append(SEP);
+        sb.append(esc(b.category)).append(SEP);
+        sb.append(esc(b.tags)).append(SEP);
+        sb.append(esc(b.readers)).append(SEP);
+        sb.append(esc(b.intro)).append(SEP);
+        sb.append(esc(b.groupPath)).append(SEP);
+        sb.append(esc(b.charset)).append(SEP);
+        sb.append(esc(b.bookId)).append(SEP);
+        sb.append(b.wordCount).append(SEP);
+        sb.append(b.chapterCount).append(SEP);
+        sb.append(b.fileSize).append(SEP);
+        sb.append(b.lastModified).append(SEP);
+        sb.append(b.addedTime).append(SEP);
+        sb.append(b.lastChapter).append(SEP);
+        sb.append(b.lastPage).append(SEP);
+        sb.append(b.lastReadTime);
+        return sb.toString();
+    }
+
+    private static Book fromLine(String line) {
+        Book b = new Book();
+        int start = 0;
+        int idx = 0;
+        int n = line.length();
+        while (start <= n) {
+            int end = line.indexOf(SEP, start);
+            if (end < 0) {
+                end = n;
+            }
+            if (end > start) {
+                setField(b, idx, line.substring(start, end));
+            }
+            idx++;
+            if (end >= n) {
+                break;
+            }
+            start = end + 1;
+        }
+        return b;
+    }
+
+    private static void setField(Book b, int idx, String v) {
+        switch (idx) {
+            case 0:
+                b.path = unesc(v);
+                break;
+            case 1:
+                b.title = unesc(v);
+                break;
+            case 2:
+                b.author = unesc(v);
+                break;
+            case 3:
+                b.status = unesc(v);
+                break;
+            case 4:
+                b.rating = unesc(v);
+                break;
+            case 5:
+                b.category = unesc(v);
+                break;
+            case 6:
+                b.tags = unesc(v);
+                break;
+            case 7:
+                b.readers = unesc(v);
+                break;
+            case 8:
+                b.intro = unesc(v);
+                break;
+            case 9:
+                b.groupPath = unesc(v);
+                break;
+            case 10:
+                b.charset = unesc(v);
+                break;
+            case 11:
+                b.bookId = unesc(v);
+                break;
+            case 12:
+                b.wordCount = toLong(v, -1);
+                break;
+            case 13:
+                b.chapterCount = (int) toLong(v, -1);
+                break;
+            case 14:
+                b.fileSize = toLong(v, 0);
+                break;
+            case 15:
+                b.lastModified = toLong(v, 0);
+                break;
+            case 16:
+                b.addedTime = toLong(v, 0);
+                break;
+            case 17:
+                b.lastChapter = (int) toLong(v, -1);
+                break;
+            case 18:
+                b.lastPage = (int) toLong(v, 0);
+                break;
+            case 19:
+                b.lastReadTime = toLong(v, 0);
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** 转义：分隔符、反斜杠、换行（简介里可能出现换行） */
+    private static String esc(String s) {
+        if (s == null || s.length() == 0) {
+            return "";
+        }
+        boolean dirty = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == SEP || c == '\\' || c == '\n' || c == '\r') {
+                dirty = true;
+                break;
+            }
+        }
+        if (!dirty) {
+            return s;
+        }
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\') {
+                sb.append("\\\\");
+            } else if (c == SEP) {
+                sb.append("\\1");
+            } else if (c == '\n') {
+                sb.append("\\n");
+            } else if (c == '\r') {
+                sb.append("\\r");
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String unesc(String s) {
+        if (s == null || s.indexOf('\\') < 0) {
+            return s == null ? "" : s;
+        }
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c != '\\' || i + 1 >= s.length()) {
+                sb.append(c);
+                continue;
+            }
+            char d = s.charAt(++i);
+            if (d == '\\') {
+                sb.append('\\');
+            } else if (d == '1') {
+                sb.append(SEP);
+            } else if (d == 'n') {
+                sb.append('\n');
+            } else if (d == 'r') {
+                sb.append('\r');
+            } else {
+                sb.append(d);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static long toLong(String s, long def) {
+        try {
+            return Long.parseLong(s);
+        } catch (Exception e) {
+            return def;
         }
     }
 

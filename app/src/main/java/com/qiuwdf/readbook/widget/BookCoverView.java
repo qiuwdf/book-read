@@ -96,7 +96,9 @@ public class BookCoverView extends View {
                 }
             }
         }
-        requestLayout();
+        // 只 invalidate，**不** requestLayout：封面高度只由宽度决定，同一列宽下高度不变，
+        // 交给 onMeasure 就够了。滑动中每个条目都 requestLayout 会连带 RecyclerView
+        // 多走一次布局，是掉帧的常见来源（列表列数变化时布局管理器本来就会重新测量）。
         invalidate();
     }
 
@@ -196,10 +198,10 @@ public class BookCoverView extends View {
     }
 
     /**
-     * 画底部阅读进度条：有封面图时叠在图上，无图时叠在配色封面上。
-     * 有图时轨道用 60% 不透明黑、白色填充外围加 1dp 深色描边，
-     * 保证在浅色（白底封面）和深色图片上都清晰可见——纯白细条贴浅色图上肉眼不可见。
-     * 抽成独立方法便于回归测试观测（子类可重写计数）。
+     * 画底部阅读进度条：**有封面图和无图用同一套样式**（半透明白轨道 + 白色进度段），
+     * 不再给图片封面单独加描边/加粗 —— 底色不同导致风格不统一，用户观感也乱。
+     *
+     * <p>抽成独立方法便于回归测试观测（子类可重写计数）。
      */
     protected void drawProgressBar(Canvas canvas, int w, int h) {
         if (mProgress < 0) {
@@ -207,27 +209,46 @@ public class BookCoverView extends View {
         }
         float pad = Ui.dp(getContext(), 10);
         float barY = h - Ui.dp(getContext(), 8);
-        float barH = Ui.dp(getContext(), mCoverBitmap != null ? 3f : 2.5f);
+        float barH = Ui.dp(getContext(), 2.5f);
         float barW = w - pad * 2;
-        float fillW = barW * Math.min(1f, mProgress / 100f);
-        if (mCoverBitmap != null) {
-            // 轨道：60% 不透明黑，未读部分在任何底色的图上都可见
-            mProgressBg.setColor(0x99000000);
-            canvas.drawRect(pad, barY, pad + barW, barY + barH, mProgressBg);
-            if (fillW > 0) {
-                // 填充外先垫一圈 80% 不透明黑描边，纯白封面读到 100% 也不消失
-                mProgressBg.setColor(0xCC000000);
-                float o = Ui.dp(getContext(), 1);
-                canvas.drawRect(pad - o, barY - o, pad + fillW + o, barY + barH + o, mProgressBg);
-                mProgressPaint.setColor(0xFFFFFFFF);
-                canvas.drawRect(pad, barY, pad + fillW, barY + barH, mProgressPaint);
-            }
-            return;
-        }
-        mProgressBg.setColor(0x33FFFFFF);
+        mProgressBg.setColor(PROGRESS_TRACK_COLOR);
+        mLastTrackColor = mProgressBg.getColor();
         canvas.drawRect(pad, barY, pad + barW, barY + barH, mProgressBg);
-        mProgressPaint.setColor(0xFFFFFFFF);
-        canvas.drawRect(pad, barY, pad + fillW, barY + barH, mProgressPaint);
+        mProgressPaint.setColor(PROGRESS_FILL_COLOR);
+        mLastFillColor = mProgressPaint.getColor();
+        canvas.drawRect(pad, barY, pad + barW * Math.min(1f, mProgress / 100f),
+                barY + barH, mProgressPaint);
+    }
+
+    /** 进度条轨道色（半透明白），有图 / 无图统一 */
+    public static final int PROGRESS_TRACK_COLOR = 0x33FFFFFF;
+    /** 进度段颜色（白） */
+    public static final int PROGRESS_FILL_COLOR = 0xFFFFFFFF;
+
+    /** 最近一次绘制进度条实际用的颜色（仅测试断言用，保证断言的是真实绘制值） */
+    private int mLastTrackColor = PROGRESS_TRACK_COLOR;
+    private int mLastFillColor = PROGRESS_FILL_COLOR;
+
+    /** 仅测试用：最近一次真正画进度条时用的轨道色 */
+    public int progressTrackColorForTest() {
+        return mLastTrackColor;
+    }
+
+    /** 仅测试用：最近一次真正画进度条时用的进度段颜色 */
+    public int progressFillColorForTest() {
+        return mLastFillColor;
+    }
+
+    /**
+     * 封面图是异步解码的：位图到货时（或视图被复用/重新附着时）必须重绘，
+     * 否则进度条会停在上一帧、看起来「没画出来」。
+     */
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (mCoverBitmap != null) {
+            invalidate();
+        }
     }
 
     private List<String> wrap(String text, float maxW, int maxLines) {

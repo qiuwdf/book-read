@@ -16,6 +16,7 @@ import android.widget.TextView;
 import androidx.appcompat.widget.AppCompatImageView;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.qiuwdf.readbook.R;
@@ -23,6 +24,7 @@ import com.qiuwdf.readbook.core.Book;
 import com.qiuwdf.readbook.core.Bookshelf;
 import com.qiuwdf.readbook.core.Prefs;
 import com.qiuwdf.readbook.core.Storage;
+import com.qiuwdf.readbook.util.CoverLoader;
 import com.qiuwdf.readbook.util.Ui;
 
 import java.io.File;
@@ -63,6 +65,41 @@ public class BookshelfFragment extends Fragment implements DirPickerUi.Host {
     /** 发起分组树选择页的请求码（public 供无设备测试直接喂结果） */
     public static final int REQ_PICK_GROUP = 41;
 
+    /** 上次刷新时看到的阅读进度版本号（用于「阅读回来要重画封面进度条」） */
+    private int mProgressVersionSeen = -1;
+
+    /**
+     * 预解码「视野下方」多少本封面（渲染距离）。
+     * 低堆机型减半 —— 预取太多会把 LRU 冲掉，正在看的封面反而被挤出去。
+     * public 供无设备测试断言下限。
+     */
+    public static int coverPrefetchAhead() {
+        return Runtime.getRuntime().maxMemory() < 48L * 1024 * 1024 ? 6 : 12;
+    }
+
+    /** 预取节流：滑动时最多 150ms 触发一次，别让主线程泡在预取里 */
+    private static final long PREFETCH_INTERVAL_MS = 150;
+
+    /** 滑动时保留在缓存里的行外条目数（默认才 2，滑过去再滑回来会重新 bind 封面） */
+    private static final int VIEW_CACHE_SIZE = 12;
+
+    private long mLastPrefetchAt;
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        // 封面上的进度条是画出来的，不是控件：阅读页改了进度（甚至换了本书）后
+        // 回到书架，必须重新绑定列表才会重绘，否则进度条一直停在进阅读页之前的样子。
+        if (mAdapter == null || getActivity() == null || mAllBooks.isEmpty()) {
+            return;
+        }
+        int v = Bookshelf.get(getActivity()).progressVersion();
+        if (v != mProgressVersionSeen) {
+            mProgressVersionSeen = v;
+            applyFilter();
+        }
+    }
+
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
         View root = inflater.inflate(R.layout.fragment_bookshelf, container, false);
@@ -78,6 +115,18 @@ public class BookshelfFragment extends Fragment implements DirPickerUi.Host {
         mAdapter = new BookGridAdapter();
         mRecycler.setLayoutManager(new GridLayoutManager(getActivity(), gridColumns(getResources())));
         mRecycler.setAdapter(mAdapter);
+        // 网格列宽固定、条目高度只由宽度决定 → 数据变化不必让 RecyclerView 重新测量
+        mRecycler.setHasFixedSize(true);
+        // 默认只缓存 2 个行外条目：滑过去再滑回来封面要重新 bind 一次（看起来像没渲染完）
+        mRecycler.setItemViewCacheSize(VIEW_CACHE_SIZE);
+        // 封面是异步解码的：滑动一快，封面还没解出来就被滑过去了。这里在滚动时
+        // 提前解码视野下方若干本，滑到跟前时直接命中内存缓存，同步画出。
+        mRecycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(RecyclerView rv, int dx, int dy) {
+                prefetchCoversAhead();
+            }
+        });
         mAdapter.setOnBookClick(new BookGridAdapter.OnBookClick() {
             @Override
             public void onClick(Book book) {
@@ -206,6 +255,10 @@ public class BookshelfFragment extends Fragment implements DirPickerUi.Host {
         showScanning(false);
         updateGroupName();
         applyFilter();
+        if (getActivity() != null) {
+            // 记住当前进度版本：这样「刚加载完就 onResume」不会多做一次无谓的排序
+            mProgressVersionSeen = Bookshelf.get(getActivity()).progressVersion();
+        }
     }
 
     // ------------------------------------------------------------------ 排列
@@ -302,6 +355,55 @@ public class BookshelfFragment extends Fragment implements DirPickerUi.Host {
             mTitle.setText(mAllBooks.isEmpty()
                     ? getString(R.string.bookshelf)
                     : getString(R.string.book_count, mShownBooks.size()));
+        }
+        // 列表换了一批：首屏的封面由 bind 自己解，但要滑到第二屏时它们还没开始解码，
+        // 所以这里在布局完成后补一次预取，把「第一屏 + 渲染距离」的封面先热起来。
+        if (mRecycler != null) {
+            mRecycler.post(new Runnable() {
+                @Override
+                public void run() {
+                    prefetchCoversAhead();
+                }
+            });
+        }
+    }
+
+    // ------------------------------------------------------------------ 封面预取
+
+    /**
+     * 预解码视野下方的若干本封面（带节流）。滑得越快，越依赖这里提前解码：
+     * 滑到跟前时 {@link CoverLoader#peek} 已经命中，封面当帧就画出来。
+     */
+    private void prefetchCoversAhead() {
+        if (mRecycler == null || mAdapter == null) {
+            return;
+        }
+        RecyclerView.LayoutManager lm = mRecycler.getLayoutManager();
+        if (!(lm instanceof LinearLayoutManager)) {
+            return;
+        }
+        int last = ((LinearLayoutManager) lm).findLastVisibleItemPosition();
+        if (last < 0) {
+            // 还没布局完成：先把开头的几屏热起来
+            prefetchCovers(0, coverPrefetchAhead());
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - mLastPrefetchAt < PREFETCH_INTERVAL_MS) {
+            return;
+        }
+        mLastPrefetchAt = now;
+        prefetchCovers(last + 1, last + 1 + coverPrefetchAhead());
+    }
+
+    /** 预解码 [from, to) 区间的封面（越界自动收敛） */
+    private void prefetchCovers(int from, int to) {
+        if (mAdapter == null) {
+            return;
+        }
+        int count = mAdapter.getItemCount();
+        for (int i = Math.max(0, from); i < Math.min(count, to); i++) {
+            CoverLoader.prefetch(mAdapter.bookAt(i));
         }
     }
 

@@ -43,6 +43,14 @@ public class BookGridAdapter extends RecyclerView.Adapter<BookGridAdapter.Holder
         mClickListener = l;
     }
 
+    /** 第 position 本（越界返回 null）。书架用它预取「马上要滑到」的封面 */
+    public Book bookAt(int position) {
+        if (position < 0 || position >= mBooks.size()) {
+            return null;
+        }
+        return mBooks.get(position);
+    }
+
     public void setOnBookLongClick(OnBookLongClick l) {
         mLongClickListener = l;
     }

@@ -11,6 +11,10 @@ import java.util.List;
  *
  * <p>设置页的「清除解析缓存」显示占用与执行清理都走这里，
  * 避免界面各处自己拼缓存文件路径（以后再加缓存文件也只改这一个地方）。
+ *
+ * <p>阅读进度账本（{@link ReadProgressStore}）**不算在这里的占用里** ——
+ * 它是用户的数据而不是可以重建的缓存；但清理时会顺手丢掉「书架上已经没有的书」
+ * 对应的进度，书还在书架上的进度一律保留。
  */
 public final class AppCache {
 
@@ -44,12 +48,26 @@ public final class AppCache {
         return total;
     }
 
-    /** 清空全部缓存：书架索引 + 各书解析索引 */
+    /**
+     * 清空缓存：书架索引 + 各书解析索引，
+     * 并顺手丢掉「书架上已经没有的书」的阅读进度（还在书架上的进度必须保留）。
+     */
     public static void clear(Context c) {
-        File shelf = Bookshelf.get(c).cacheFile();
-        if (shelf.isFile()) {
+        Bookshelf shelf = Bookshelf.get(c);
+        // 先按「当前书架还存在的书」做白名单，再清文件：顺序反了就认不出哪些书还在了。
+        // 书架还没加载过（列表为空）时什么都不删 —— 宁可留着，也不能把用户的进度清光。
+        List<Book> alive = shelf.getBooks();
+        if (!alive.isEmpty()) {
+            List<String> keys = new ArrayList<String>(alive.size());
+            for (Book b : alive) {
+                keys.add(ReadProgressStore.keyOf(b));
+            }
+            ReadProgressStore.get(c).clearMissing(keys);
+        }
+        File cache = shelf.cacheFile();
+        if (cache.isFile()) {
             //noinspection ResultOfMethodCallIgnored
-            shelf.delete();
+            cache.delete();
         }
         BookIndexCache.clear(c);
     }

@@ -45,6 +45,7 @@ import com.qiuwdf.readbook.core.Bookshelf;
 import com.qiuwdf.readbook.core.Chapter;
 import com.qiuwdf.readbook.core.GroupTree;
 import com.qiuwdf.readbook.core.Prefs;
+import com.qiuwdf.readbook.core.ReadProgressStore;
 import com.qiuwdf.readbook.core.Storage;
 import com.qiuwdf.readbook.parser.BookParser;
 import com.qiuwdf.readbook.parser.EncodingDetector;
@@ -109,6 +110,12 @@ public class SmokeTest {
             f.set(null, null);
         } catch (Throwable ignore) {
             // 字段改名不影响用例
+        }
+        // 阅读进度账本也是静态单例：每个用例换一份全新的（否则上一个用例写的进度会串进来）
+        try {
+            ReadProgressStore.resetForTest(RuntimeEnvironment.getApplication());
+        } catch (Throwable ignore) {
+            // 同上
         }
     }
 
@@ -811,6 +818,40 @@ public class SmokeTest {
 
     private static void idleMain() {
         Shadows.shadowOf(Looper.getMainLooper()).idle();
+    }
+
+    /** 让 View 真正量好尺寸并绘制一帧（用于断言绘制期才确定的样式，如进度条颜色） */
+    private static void drawAt(View v) {
+        v.measure(View.MeasureSpec.makeMeasureSpec(300, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        v.layout(0, 0, v.getMeasuredWidth(), v.getMeasuredHeight());
+        v.draw(new Canvas(Bitmap.createBitmap(v.getMeasuredWidth(), v.getMeasuredHeight(),
+                Bitmap.Config.ARGB_8888)));
+    }
+
+    /** 写一本「书名可指定」的短小说：书里可能带分隔符、反斜杠等用来验证缓存转义的字符 */
+    private static void writeBookWithTitle(File f, String title) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append("书名：").append(title).append("\n");
+        sb.append("作者：测试作者\n");
+        sb.append("book_id=999001\n");
+        sb.append("状态：完结\n");
+        sb.append("字数：12000\n");
+        sb.append("章节：3\n");
+        sb.append("简介：用于验证缓存格式的转义。\n");
+        sb.append("==================================================\n\n");
+        for (int ch = 1; ch <= 3; ch++) {
+            sb.append("第").append(ch).append("章 测试章节\n\n");
+            for (int p = 0; p < 12; p++) {
+                sb.append("\u3000\u3000用来把文件撑到 512 字节以上，保证扫描不会跳过它。\n\n");
+            }
+        }
+        Writer w = new OutputStreamWriter(new FileOutputStream(f), "UTF-8");
+        try {
+            w.write(sb.toString());
+        } finally {
+            w.close();
+        }
     }
 
     private static String join(List<String> list) {
@@ -1631,13 +1672,16 @@ public class SmokeTest {
         });
         assertFalse("旧版整表 JSON 缓存没有被清掉", legacy.isFile());
 
-        // 格式：首行格式头 + 一行一本
+        // 格式：首行格式头 + 一行一本（v3 起是 0x01 分隔的紧凑格式，不再是 JSON —— 弱机启动快的关键）
         List<String> lines = readLines(cache);
         assertEquals("缓存必须是「首行格式头 + 一行一本」", n + 1, lines.size());
+        assertEquals("缓存格式头", "readbook.library.v3", lines.get(0));
         for (int i = 1; i < lines.size(); i++) {
             String line = lines.get(i);
-            assertTrue("第 " + i + " 行不是单本书的 JSON 对象：" + line.substring(0, Math.min(40, line.length())),
-                    line.startsWith("{") && line.endsWith("}"));
+            assertTrue("第 " + i + " 行丢了路径字段：" + line.substring(0, Math.min(40, line.length())),
+                    line.indexOf('\u0001') > 0);
+            assertFalse("v3 紧凑格式不该再出现 JSON 花括号",
+                    line.indexOf('{') >= 0);
         }
         System.out.println("[SmokeTest] 缓存首行=" + lines.get(0) + " 行数=" + lines.size());
 
@@ -1653,9 +1697,10 @@ public class SmokeTest {
         assertEquals("缓存里的简介丢了", true, one.intro.length() > 0);
         System.out.println("[SmokeTest] 缓存读回 " + fromCache.size() + " 本，首条书名=" + one.title);
 
-        // 单行损坏：只丢那一本，其余照常读回
+        // 单行损坏：只丢那一本，其余照常读回。
+        // v3 的容错口径是「路径字段为空就算坏行（丢掉）」，所以这里造一行以分隔符开头的记录。
         List<String> broken = readLines(cache);
-        broken.set(3, "{这一行坏掉了");
+        broken.set(3, "\u0001损坏的一行");
         writeLines(cache, broken);
         restartBookshelf();
         Bookshelf afterBroken = Bookshelf.get(app);
@@ -2065,6 +2110,352 @@ public class SmokeTest {
         assertTrue("没有封面图时点封面不应弹窗",
                 ShadowDialog.getLatestDialog() == before);
         c.pause().stop().destroy();
+    }
+
+    /**
+     * 35) 封面进度条「有图 / 无图同一套样式」：曾经给图片封面单独加深色轨道 + 描边，
+     * 和配色封面风格不一致（用户要求统一），这里把两侧用的颜色都锁死。
+     */
+    @Test
+    public void progressBarStyleIsUnifiedForBitmapAndColorCover() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        File dir = Storage.appPrivateDir(app);
+        Storage.ensureDir(dir);
+        File txt = new File(dir, "统一样式书.txt");
+        writeBook(txt);
+        writePng(new File(dir, "999001.png"), 0xFFF2F2F2);      // 浅色图：旧实现下白条几乎看不见
+
+        Book read = new Book();
+        read.path = txt.getAbsolutePath();
+        read.bookId = "999001";
+        read.title = "统一样式书";
+        read.chapterCount = 10;
+        read.lastChapter = 3;
+        read.lastReadTime = System.currentTimeMillis();
+
+        ProgressSpyCover withImage = new ProgressSpyCover(app);
+        withImage.bind(read);
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return withImage.coverBitmapForTest() != null;
+            }
+        });
+        drawAt(withImage);
+        assertEquals("有图时进度条必须绘制", 1, withImage.calls);
+        assertEquals("有图时轨道色必须与配色封面一致",
+                BookCoverView.PROGRESS_TRACK_COLOR, withImage.progressTrackColorForTest());
+        assertEquals("有图时进度色必须与配色封面一致",
+                BookCoverView.PROGRESS_FILL_COLOR, withImage.progressFillColorForTest());
+
+        // 对照：同一本书没有封面图（配色封面）时的样式必须一模一样
+        Book colored = new Book();
+        colored.path = txt.getAbsolutePath();
+        colored.bookId = "";
+        colored.title = "统一样式书";
+        colored.chapterCount = 10;
+        colored.lastChapter = 3;
+        colored.lastReadTime = System.currentTimeMillis();
+
+        ProgressSpyCover noImage = new ProgressSpyCover(app);
+        noImage.bind(colored);
+        drawAt(noImage);
+        assertEquals("配色封面也要画进度条", 1, noImage.calls);
+        assertEquals("两侧轨道色必须相同",
+                noImage.progressTrackColorForTest(), withImage.progressTrackColorForTest());
+        assertEquals("两侧进度色必须相同",
+                noImage.progressFillColorForTest(), withImage.progressFillColorForTest());
+    }
+
+    /**
+     * 36) 阅读进度按「书号」记账：换目录（路径变了）后同一本书的进度要能认回来，
+     * 且「杀进程重开」（重新从文件读）之后依然在。
+     */
+    @Test
+    public void readProgressFollowsBookIdAcrossDirectoryChange() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        File base = Storage.appPrivateDir(app);
+        Storage.ensureDir(base);
+        File oldDir = new File(base, "旧目录");
+        File newDir = new File(base, "新目录");
+        Storage.ensureDir(oldDir);
+        Storage.ensureDir(newDir);
+        File oldTxt = new File(oldDir, "换目录书.txt");
+        File newTxt = new File(newDir, "换目录书-新版.txt");
+        writeBook(oldTxt);
+        writeBook(newTxt);      // 同一个 book_id=999001
+
+        ReadProgressStore store = ReadProgressStore.get(app);
+        Book before = new Book();
+        before.path = oldTxt.getAbsolutePath();
+        before.bookId = "999001";
+        before.title = "冒烟测试书";
+        before.chapterCount = 3;
+        store.save(before, 2, 5);
+        assertTrue("进度账本必须落盘", store.file().isFile());
+
+        // 杀进程重开：账本从文件读回来，原文件就算不在了也照样留着
+        ReadProgressStore.resetForTest(app);
+        ReadProgressStore reopened = ReadProgressStore.get(app);
+        reopened.loadSync();
+        assertNotNull("重开后必须还能找到这本书的进度",
+                reopened.find(ReadProgressStore.keyOf(before)));
+
+        // 换了目录：路径变了、书号没变 → 进度必须认回来
+        Book moved = new Book();
+        moved.path = newTxt.getAbsolutePath();
+        moved.bookId = "999001";
+        moved.title = "冒烟测试书";
+        moved.chapterCount = 3;
+        List<Book> shelf = new ArrayList<Book>();
+        shelf.add(moved);
+        assertEquals("换目录后必须恢复进度", 1, reopened.applyTo(shelf));
+        assertEquals(2, moved.lastChapter);
+        assertEquals(5, moved.lastPage);
+        assertTrue(moved.lastReadTime > 0);
+    }
+
+    /**
+     * 37) 清缓存不能连累书架上还在的书：只丢掉「书架上已经没有了」的进度。
+     */
+    @Test
+    public void clearingCacheKeepsProgressOfBooksStillOnShelf() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        File dir = Storage.appPrivateDir(app);
+        Storage.ensureDir(dir);
+        Prefs.get().setStorageDir(dir.getAbsolutePath());
+        writeBook(new File(dir, "保留进度书.txt"));
+
+        restartBookshelf();
+        final Bookshelf shelf = Bookshelf.get(app);
+        shelf.rescanAsync(null);
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return shelf.isLoaded() && !shelf.getBooks().isEmpty();
+            }
+        });
+        Book onShelf = shelf.getBooks().get(0);
+
+        ReadProgressStore store = ReadProgressStore.get(app);
+        store.save(onShelf, 2, 1);
+        Book gone = new Book();
+        gone.path = new File(dir, "已经删掉的书.txt").getAbsolutePath();
+        gone.bookId = "888888";
+        gone.title = "已经删掉的书";
+        gone.chapterCount = 5;
+        store.save(gone, 4, 3);
+
+        AppCache.clear(app);
+
+        ReadProgressStore after = ReadProgressStore.get(app);
+        assertNotNull("书架里还有的书，进度必须保留",
+                after.find(ReadProgressStore.keyOf(onShelf)));
+        assertNull("书架里已经没有的书，清缓存时丢掉进度",
+                after.find(ReadProgressStore.keyOf(gone)));
+        assertFalse("书架缓存文件本身仍要被清掉",
+                new File(app.getFilesDir(), Bookshelf.CACHE_FILE_NAME).isFile());
+    }
+
+    /**
+     * 38) 书架缓存换成紧凑格式（v3）后仍要能原样读回，含书名里的分隔符、反斜杠等特殊字符。
+     */
+    @Test
+    public void compactLibraryCacheRoundTrip() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        File dir = Storage.appPrivateDir(app);
+        Storage.ensureDir(dir);
+        Prefs.get().setStorageDir(dir.getAbsolutePath());
+        File txt = new File(dir, "特殊字符书.txt");
+        writeBookWithTitle(txt, "特殊\u0001书名\\测试");
+
+        restartBookshelf();
+        final Bookshelf shelf = Bookshelf.get(app);
+        shelf.rescanAsync(null);
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return shelf.isLoaded() && !shelf.getBooks().isEmpty();
+            }
+        });
+
+        final File cache = new File(app.getFilesDir(), Bookshelf.CACHE_FILE_NAME);
+        // 缓存是扫描结束后**异步**落盘的：必须等文件真的写出来再读，
+        // 否则会跟后台 save() 的 rename 赛跑（偶发 FileNotFoundException）
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return cache.isFile() && cache.length() > 0;
+            }
+        });
+        List<String> lines = readLines(cache);
+        assertEquals("缓存格式头", "readbook.library.v3", lines.get(0));
+        assertEquals("除格式头外一行一本", 2, lines.size());
+        assertTrue("紧凑格式里不该再有 JSON 花括号", lines.get(1).indexOf('{') < 0);
+
+        // 杀进程重开 → 只读缓存，字段（含特殊字符）必须原样
+        restartBookshelf();
+        List<Book> books = readCacheOnly(Bookshelf.get(app));
+        assertEquals(1, books.size());
+        String title = books.get(0).title;
+        assertTrue("书名里的中文字符丢了：" + title, title.contains("特殊"));
+        assertTrue("书名里的分隔符没有被正确转义：" + title, title.indexOf('\u0001') >= 0);
+        assertTrue("书名里的反斜杠没有被正确转义：" + title, title.indexOf('\\') >= 0);
+        assertEquals("测试作者", books.get(0).author);
+        assertTrue(books.get(0).chapterCount > 0);
+    }
+
+    /**
+     * 39) 旧版（v2）JSON 缓存仍要能读：否则升级后第一次启动会白白重扫一遍全库。
+     */
+    @Test
+    public void legacyJsonCacheStillReadable() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        restartBookshelf();
+        File cache = new File(app.getFilesDir(), Bookshelf.CACHE_FILE_NAME);
+        List<String> lines = new ArrayList<String>();
+        lines.add("readbook.library.v2");
+        lines.add("{\"path\":\"/sdcard/旧格式/旧书.txt\",\"title\":\"旧格式书\",\"author\":\"旧作者\","
+                + "\"bid\":\"123456\",\"chapters\":10,\"lc\":4,\"lp\":2,\"lrt\":99}");
+        writeLines(cache, lines);
+
+        List<Book> books = readCacheOnly(Bookshelf.get(app));
+        assertEquals(1, books.size());
+        assertEquals("/sdcard/旧格式/旧书.txt", books.get(0).path);
+        assertEquals("旧格式书", books.get(0).title);
+        assertEquals("旧作者", books.get(0).author);
+        assertEquals(10, books.get(0).chapterCount);
+        assertEquals(4, books.get(0).lastChapter);
+        assertEquals(2, books.get(0).lastPage);
+        assertEquals(99, books.get(0).lastReadTime);
+    }
+
+    /**
+     * 40) 启动加载**只回调一次**，且这一次就是完整书架。
+     *
+     * <p>旧实现「缓存读到 200 本先回调一次」分批出屏，用户看到的是标题栏先写
+     * 「共 200 本」、过一会才跳成真实数量；首批出屏还会让列表整体重建一次，更容易看到闪烁。
+     * 现在改为读完缓存一次性出屏 —— 本用例锁住「回调次数为 1 且内容完整」。
+     */
+    @Test
+    public void startupPublishesCompleteShelfInOneCallback() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        File dir = Storage.appPrivateDir(app);
+        Storage.ensureDir(dir);
+        Prefs.get().setStorageDir(dir.getAbsolutePath());
+        final int total = 260;      // 跨过旧实现 200 本的分批阈值
+        for (int i = 0; i < total; i++) {
+            writeBook(new File(dir, "批量书" + i + ".txt"));
+        }
+
+        restartBookshelf();
+        final Bookshelf first = Bookshelf.get(app);
+        first.rescanAsync(null);
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return first.isLoaded() && first.getBooks().size() == total;
+            }
+        });
+        assertTrue("测试前置：缓存必须落盘",
+                new File(app.getFilesDir(), Bookshelf.CACHE_FILE_NAME).isFile());
+
+        // 杀进程重开：只能有一次回调，且必须是完整书架
+        restartBookshelf();
+        final Bookshelf fresh = Bookshelf.get(app);
+        final List<Integer> sizes = new ArrayList<Integer>();
+        fresh.loadAsync(new Bookshelf.Callback() {
+            @Override
+            public void onLoaded(List<Book> books) {
+                sizes.add(books.size());
+            }
+        });
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return fresh.isLoaded();
+            }
+        });
+        idleMain();
+        assertEquals("启动加载只能回调一次（不许分批出屏），实际：" + sizes, 1, sizes.size());
+        assertEquals("这一次就必须是完整书架", total, sizes.get(0).intValue());
+        assertEquals("书架内部状态也得是完整的", total, fresh.getBooks().size());
+    }
+
+    /**
+     * 41) 存储目录不可读（存储卡拔了 / 目录被删）时，启动不做无意义的全盘扫描。
+     */
+    @Test
+    public void startupSkipsScanWhenStorageDirMissing() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        File missing = new File(Storage.appPrivateDir(app), "不存在的目录/更深一层");
+        Prefs.get().setStorageDir(missing.getAbsolutePath());
+        File cache = new File(app.getFilesDir(), Bookshelf.CACHE_FILE_NAME);
+        if (cache.isFile()) {
+            assertTrue(cache.delete());
+        }
+
+        restartBookshelf();
+        final Bookshelf fresh = Bookshelf.get(app);
+        final List<String> events = new ArrayList<String>();
+        fresh.setProgressListener(new Bookshelf.Progress() {
+            @Override
+            public void onProgress(int done, int total) {
+                events.add(done + "/" + total);
+            }
+        });
+        fresh.loadAsync(null);
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return fresh.isLoaded();
+            }
+        });
+        idleMain();
+        assertTrue("目录不存在时不该白扫一遍，却收到进度事件：" + events, events.isEmpty());
+        assertTrue("没有目录也没有缓存时书架就该是空的", fresh.getBooks().isEmpty());
+    }
+
+    /**
+     * 42) 封面预取：滑动前先把「马上要滑到」的封面解码进内存缓存，
+     * 用户滑到时 bind 里的 peek 直接命中，同步就能画出来（否则快速滑动是一片白块）。
+     */
+    @Test
+    public void prefetchWarmsCoverCacheBeforeBind() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        File dir = Storage.appPrivateDir(app);
+        Storage.ensureDir(dir);
+        File txt = new File(dir, "预取封面书.txt");
+        writeBook(txt);
+        writePng(new File(dir, "777001.png"), 0xFF2266AA);
+
+        final Book b = new Book();
+        b.path = txt.getAbsolutePath();
+        b.bookId = "777001";        // 故意用别的用例没占用的书号，避免 LRU 跨用例命中
+
+        assertNull("前置：内存缓存里不该有这张图", CoverLoader.peek(b));
+        CoverLoader.prefetch(b);
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return CoverLoader.peek(b) != null;
+            }
+        });
+        Bitmap warmed = CoverLoader.peek(b);
+        assertTrue("预取到的封面尺寸异常", warmed.getWidth() > 0 && warmed.getHeight() > 0);
+        System.out.println("[SmokeTest] 封面预取命中 " + warmed.getWidth() + "x" + warmed.getHeight());
+
+        // 没有封面文件的书：预取必须安全跳过，不能抛异常
+        Book noCover = new Book();
+        noCover.path = txt.getAbsolutePath();
+        noCover.bookId = "777999";
+        CoverLoader.prefetch(noCover);
+        idleMain();
+        assertNull("没有封面文件时不该有缓存", CoverLoader.peek(noCover));
+
+        // 渲染距离必须有下限（滑一屏至少要预到下一屏）
+        assertTrue("书架预取距离过小：" + BookshelfFragment.coverPrefetchAhead(),
+                BookshelfFragment.coverPrefetchAhead() >= 6);
     }
 
     /** 计数 drawProgressBar 调用次数（onDraw 里只在进度有效时才调用） */
