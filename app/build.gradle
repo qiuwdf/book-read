@@ -19,8 +19,8 @@ android {
         // 最低支持 Android 4.0 (API 14)
         minSdk 14
         targetSdk 34
-        versionCode 32
-        versionName "1.0.31"
+        versionCode 33
+        versionName "1.0.32"
         vectorDrawables.useSupportLibrary = true
     }
 

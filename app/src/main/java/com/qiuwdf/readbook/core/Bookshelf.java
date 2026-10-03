@@ -30,6 +30,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 书架（本地书籍库）：扫描存储目录 -> 按文件夹分组 -> 缓存元数据 -> 提供排序与进度管理。
@@ -49,6 +52,17 @@ public final class Bookshelf {
     private static final String TAG = "Bookshelf";
 
     private static final int MAX_SCAN_DEPTH = 3;
+
+    /**
+     * 扫描并行度上限：跑满设备核数（{@code availableProcessors()}），
+     * 但封顶 8 —— 再多收益递减，只会让并发解析同时占用更多临时对象。
+     */
+    private static final int SCAN_THREADS_MAX = 8;
+    /** 低堆机型（<32MB）收敛到 2 线程，压住并发解析的临时对象峰值 */
+    private static final int SCAN_THREADS_LOW_HEAP = 2;
+
+    /** 仅供测试：强制扫描并行度（<=0 表示按设备自动决定） */
+    private static volatile int sScanThreadsOverride;
 
     /** 进度上报的最小间隔（毫秒），避免几千本书把主线程淹没在进度消息里 */
     private static final long PROGRESS_INTERVAL_MS = 200;
@@ -284,46 +298,52 @@ public final class Bookshelf {
             }
         }
 
-        List<Book> result = new ArrayList<Book>();
+        final Book[] slot = new Book[total];
+        // 第一阶段（串行、极快）：文件没变过的书直接复用旧对象；其余（新增 / 替换过的）才需要读盘解析
+        final List<File> pending = new ArrayList<File>();
+        final List<Integer> pendingAt = new ArrayList<Integer>();
+        final Map<String, Book> cachedOf = new HashMap<String, Book>();
         int done = 0;
-        int failed = 0;
-        for (File f : files) {
+        for (int i = 0; i < total; i++) {
+            File f = files.get(i);
             String path = f.getAbsolutePath();
             Book cached = old.remove(path);     // 取走即从 map 摘除，旧对象能尽早被回收
             if (cached != null && cached.lastModified == f.lastModified()
                     && cached.fileSize == f.length() && cached.exists()) {
                 // 目录结构可能变化，更新分组
                 cached.groupPath = relativeGroup(root, f.getParentFile());
-                result.add(cached);
+                slot[i] = cached;
+                done++;
+                notifyProgress(done, total, false);
             } else {
-                try {
-                    Book b = buildBook(f, root);
-                    if (cached != null) {
-                        // 文件内容变了（用户把网上下载的新版 txt 覆盖了旧文件）：仍是同一本书，
-                        // 必须把阅读记录带过去，否则「更新一下小说」就会把自己的进度清零。
-                        b.lastChapter = cached.lastChapter;
-                        b.lastPage = cached.lastPage;
-                        b.lastReadTime = cached.lastReadTime;
-                        b.addedTime = cached.addedTime;
-                    }
-                    result.add(b);
-                } catch (Throwable t) {
-                    // 单个文件解析失败不影响整体。这里必须接 Throwable 而不是 Exception：
-                    // 极端文件可能抛 OutOfMemoryError / StackOverflowError，而它们是 Error，
-                    // 用 catch (Exception) 漏掉的话整个扫描会直接崩掉。
-                    failed++;
-                    if (failed == 1) {
-                        Log.w(TAG, "解析失败，已跳过：" + path, t);
-                    }
+                if (cached != null) {
+                    // 文件内容变了（用户把网上下载的新版 txt 覆盖了旧文件）：仍是同一本书，
+                    // 必须把阅读记录带过去，否则「更新一下小说」就会把自己的进度清零。
+                    cachedOf.put(path, cached);
                 }
+                pending.add(f);
+                pendingAt.add(i);
             }
-            done++;
-            notifyProgress(done, total, done == total);
-        }
-        if (failed > 0) {
-            Log.w(TAG, "扫描完成，共 " + done + " 本，其中 " + failed + " 本解析失败被跳过");
         }
 
+        // 第二阶段（并行）：剩下这些要「读 32KB 头 + 探测编码 + 解析元数据」，是扫描耗时的大头。
+        // 几千本串行做在弱机上要几十秒；buildBook 只读文件 + 用局部对象，天然可并发。
+        final AtomicInteger doneCount = new AtomicInteger(done);
+        final AtomicInteger failedCount = new AtomicInteger(0);
+        if (!pending.isEmpty()) {
+            scanParallel(root, pending, pendingAt, cachedOf, slot, doneCount, failedCount, total);
+        }
+        notifyProgress(total, total, true);
+        if (failedCount.get() > 0) {
+            Log.w(TAG, "扫描完成，共 " + total + " 本，其中 " + failedCount.get() + " 本解析失败被跳过");
+        }
+
+        List<Book> result = new ArrayList<Book>(total);
+        for (Book b : slot) {
+            if (b != null) {
+                result.add(b);      // 按原下标顺序收拢，书架顺序与串行扫描完全一致
+            }
+        }
         synchronized (mLock) {
             mBooks.clear();
             mBooks.addAll(result);
@@ -331,6 +351,95 @@ public final class Bookshelf {
         // 扫描出来的书也可能是「换过目录」的老朋友：按书号把进度认回来
         applyProgressStore();
         save();
+    }
+
+    /**
+     * 并行解析待处理文件；结果按原下标回填 {@code slot}，因此书架顺序与串行扫描完全一致。
+     *
+     * <p>{@link #buildBook} 只读文件、只用局部对象，没有共享可变状态，可以安全并发；
+     * 结果集合由各线程写各自的下标位，不存在竞争。单个文件解析失败只丢那一本。
+     */
+    private void scanParallel(File root, List<File> pending, List<Integer> pendingAt,
+                              Map<String, Book> cachedOf, Book[] slot,
+                              AtomicInteger doneCount, AtomicInteger failedCount, int total) {
+        final int threads = Math.min(scanThreads(), pending.size());
+        ExecutorService pool = Executors.newFixedThreadPool(threads, new ThreadFactory() {
+            private int n;
+
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "book-scan-" + (++n));
+                t.setDaemon(true);
+                return t;
+            }
+        });
+        try {
+            for (int k = 0; k < pending.size(); k++) {
+                final File f = pending.get(k);
+                final int at = pendingAt.get(k);
+                pool.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            Book b = buildBook(f, root);
+                            Book cached = cachedOf.get(f.getAbsolutePath());
+                            if (cached != null) {
+                                b.lastChapter = cached.lastChapter;
+                                b.lastPage = cached.lastPage;
+                                b.lastReadTime = cached.lastReadTime;
+                                b.addedTime = cached.addedTime;
+                            }
+                            slot[at] = b;
+                        } catch (Throwable t) {
+                            // 必须接 Throwable 而不是 Exception：OutOfMemoryError / StackOverflowError
+                            // 都是 Error，用 Exception 接漏了会让整个扫描直接崩掉。
+                            failedCount.incrementAndGet();
+                            if (failedCount.get() == 1) {
+                                Log.w(TAG, "解析失败，已跳过：" + f.getAbsolutePath(), t);
+                            }
+                        }
+                        notifyProgress(doneCount.incrementAndGet(), total, false);
+                    }
+                });
+            }
+        } finally {
+            pool.shutdown();
+            try {
+                while (!pool.awaitTermination(1, TimeUnit.HOURS)) {
+                    // 等全部解析完再进入收尾（写缓存 / 通知界面）；中断则直接退出等待
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /**
+     * 扫描并行度：<b>跑满当前设备的 CPU 核数</b>（{@code availableProcessors()} 已考虑设备的
+     * CPU 亲和性，即「实际能用几个核」），上限 {@link #SCAN_THREADS_MAX}。
+     *
+     * <p>低堆机型（堆 &lt;32MB）收敛到 2 —— 并发解析会同时持有更多临时对象，
+     * 老机型本来就紧的堆别被逼到 OOM；单核机型返回 1，等价于原来的串行扫描。
+     */
+    public static int scanThreads() {
+        int override = sScanThreadsOverride;
+        if (override > 0) {
+            return override;
+        }
+        int cores = Runtime.getRuntime().availableProcessors();
+        if (cores < 1) {
+            cores = 1;
+        }
+        int threads = Math.min(cores, SCAN_THREADS_MAX);
+        if (Runtime.getRuntime().maxMemory() < 32L * 1024 * 1024) {
+            threads = Math.min(threads, SCAN_THREADS_LOW_HEAP);
+        }
+        return Math.max(1, threads);
+    }
+
+    /** 仅供测试：强制扫描并行度（<=0 恢复自动） */
+    public static void setScanThreadsOverrideForTest(int n) {
+        sScanThreadsOverride = n;
     }
 
     /** 把阅读进度账本套用到当前书架（换目录 / 删了又下回来的书都能恢复进度） */
@@ -342,8 +451,11 @@ public final class Bookshelf {
         }
     }
 
-    /** 上报扫描进度：限流 + post 到主线程 */
-    private void notifyProgress(final int done, final int total, boolean force) {
+    /**
+     * 上报扫描进度：限流 + post 到主线程。
+     * <p>{@code synchronized}：并行扫描时多个解析线程会一起调用，限流用的 {@code mLastProgressAt} 不是原子量。
+     */
+    private synchronized void notifyProgress(final int done, final int total, boolean force) {
         final Progress p = mProgress;
         if (p == null) {
             return;

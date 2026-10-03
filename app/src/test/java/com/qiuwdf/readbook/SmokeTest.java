@@ -117,6 +117,8 @@ public class SmokeTest {
         } catch (Throwable ignore) {
             // 同上
         }
+        // 扫描并行度也是静态开关：每个用例回到「自动」
+        Bookshelf.setScanThreadsOverrideForTest(0);
     }
 
     /** 1) 所有布局文件逐个 inflate：能抓出缺 XML 构造函数、非法主题属性等问题 */
@@ -2357,8 +2359,16 @@ public class SmokeTest {
                 return first.isLoaded() && first.getBooks().size() == total;
             }
         });
-        assertTrue("测试前置：缓存必须落盘",
-                new File(app.getFilesDir(), Bookshelf.CACHE_FILE_NAME).isFile());
+        // 落盘是后台任务（scanSync 里 save() 又排了一次队），必须等它写完再断言 ——
+        // 否则会跟 rename 赛跑，偶发看不到缓存文件。
+        final File cache = new File(app.getFilesDir(), Bookshelf.CACHE_FILE_NAME);
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return cache.isFile() && cache.length() > 0;
+            }
+        });
+        assertTrue("测试前置：缓存必须落盘", cache.isFile());
 
         // 杀进程重开：只能有一次回调，且必须是完整书架
         restartBookshelf();
@@ -2456,6 +2466,67 @@ public class SmokeTest {
         // 渲染距离必须有下限（滑一屏至少要预到下一屏）
         assertTrue("书架预取距离过小：" + BookshelfFragment.coverPrefetchAhead(),
                 BookshelfFragment.coverPrefetchAhead() >= 6);
+    }
+
+    /**
+     * 43) 多线程扫描：并行解析出来的书架必须与串行扫描**完全一致**（本数、顺序、字段）。
+     *
+     * <p>扫描从单线程改成并行后，「快」不能以「丢书 / 顺序乱跳」为代价。
+     * 结果按下标回填，顺序应与串行扫描逐项相同。
+     */
+    @Test
+    public void parallelScanMatchesSerialScan() throws Exception {
+        Context app = RuntimeEnvironment.getApplication();
+        File dir = Storage.appPrivateDir(app);
+        Storage.ensureDir(dir);
+        Prefs.get().setStorageDir(dir.getAbsolutePath());
+        for (int i = 0; i < 120; i++) {
+            writeBookWithTitle(new File(dir, "并行书" + i + ".txt"), "并行测试书" + i);
+        }
+
+        List<String> serial = scanAndSnapshot(app, 1);
+        List<String> parallel = scanAndSnapshot(app, 4);
+
+        assertTrue("前置：批量书必须真的扫出来，实际 " + serial.size(), serial.size() >= 120);
+        assertEquals("并行与串行扫描的本数必须一致", serial.size(), parallel.size());
+        assertEquals("并行扫描必须保持与串行相同的顺序与字段", serial, parallel);
+    }
+
+    /**
+     * 44) 扫描并行度按设备 CPU 核数自动决定：跑满核数（上限 8），低堆机型收敛，单核等价串行。
+     */
+    @Test
+    public void scanThreadsFollowsDeviceCpuCount() {
+        Bookshelf.setScanThreadsOverrideForTest(0);
+        int auto = Bookshelf.scanThreads();
+        int cores = Runtime.getRuntime().availableProcessors();
+        assertTrue("自动并行度应 >= 1，实际 " + auto, auto >= 1);
+        assertTrue("自动并行度不该超过核数，实际 " + auto + "（核数 " + cores + "）", auto <= cores);
+        assertTrue("自动并行度不该超过 8，实际 " + auto, auto <= 8);
+
+        // 测试钩子必须生效（并行扫描用例靠它强制 1 / 4）
+        Bookshelf.setScanThreadsOverrideForTest(3);
+        assertEquals("强制并行度必须生效", 3, Bookshelf.scanThreads());
+        Bookshelf.setScanThreadsOverrideForTest(0);
+    }
+
+    /** 用指定并行度重扫一遍，返回「路径|书名|作者|分组」快照（用于比对串行 / 并行结果） */
+    private static List<String> scanAndSnapshot(Context app, int threads) throws Exception {
+        restartBookshelf();
+        Bookshelf.setScanThreadsOverrideForTest(threads);
+        final Bookshelf shelf = Bookshelf.get(app);
+        shelf.rescanAsync(null);
+        waitUntil(new Cond() {
+            @Override
+            public boolean ok() {
+                return shelf.isLoaded();
+            }
+        });
+        List<String> snap = new ArrayList<String>();
+        for (Book b : shelf.getBooks()) {
+            snap.add(b.path + "|" + b.title + "|" + b.author + "|" + b.groupPath);
+        }
+        return snap;
     }
 
     /** 计数 drawProgressBar 调用次数（onDraw 里只在进度有效时才调用） */
