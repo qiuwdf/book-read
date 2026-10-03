@@ -58,6 +58,15 @@ book_id=999001
 - **封面**：与 txt 同目录放 `book_id.png`（book_id 即头部 `book_id=` 的值），如 `999001.png`
 - 编码支持 UTF-8 / GBK 等（自动探测，只读文件头 32KB，万册书库扫描不读全文）
 
+### 兼容番茄小说下载器
+
+本应用兼容 [Tomato-Novel-Downloader](https://github.com/zhongbai2333/Tomato-Novel-Downloader) 下载导出的小说 txt，
+无需任何转换，导出后放进存储目录即可直接阅读——书名、作者、简介、章节、卷、封面（`book_id.png`）全部自动识别。
+
+```text
+番茄小说 --下载--> Tomato-Novel-Downloader --导出 txt--> 手机存储目录 --扫描--> 秋の小说
+```
+
 ## 从源码构建
 
 ```
